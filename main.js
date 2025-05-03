@@ -1,10 +1,26 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell } = require("electron");
 const cors = require("cors");
 var express = require("express");
 const isDev = require('electron-is-dev');
 try {
   require('electron-reloader')(module)
 } catch {}
+
+const fetch = require('node-fetch');
+const Store = require('electron-store');
+const pkceChallenge = require('pkce-challenge');
+const path = require('path');
+// === CONFIGURATION ===
+const CLIENT_ID = 'openmod';
+const REALM = 'master';
+const BASE_URL = `https://idp.cronomit.hu/realms/${REALM}`;
+const REDIRECT_URI = 'http://localhost:3000/auth/callback';
+const TOKEN_ENDPOINT = `${BASE_URL}/protocol/openid-connect/token`;
+const AUTH_ENDPOINT = `${BASE_URL}/protocol/openid-connect/auth`;
+
+const store = new Store();
+let code_verifier;
+let refreshInterval;
 
 var expressApp = express();
 expressApp.use(cors());
@@ -16,6 +32,104 @@ expressApp.get("/test", (req, res) => {
   console.log("Hit");
   res.send({ response: "Here is a response" });
 });
+  // Step 1: Start login
+  expressApp.get('/auth/login', (req, res) => {
+    const { code_verifier: verifier, code_challenge } = pkceChallenge();
+    code_verifier = verifier;
+    console.log(code_challenge)
+
+    const loginUrl = `${AUTH_ENDPOINT}?` +
+      `client_id=${CLIENT_ID}&response_type=code&scope=openid` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&code_challenge=${code_challenge}&code_challenge_method=S256`;
+
+    shell.openExternal(loginUrl);
+    res.send('Opening browser for login...');
+  });
+
+  // Step 2: Callback
+  expressApp.get('/auth/callback', async (req, res) => {
+    const authCode = req.query.code;
+    if (!authCode || !code_verifier) {
+      return res.status(400).send('Missing authorization code or verifier');
+    }
+
+    try {
+      const tokenRes = await fetch(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: CLIENT_ID,
+          redirect_uri: REDIRECT_URI,
+          code: authCode,
+          code_verifier: code_verifier
+        })
+      });
+
+      const tokenData = await tokenRes.json();
+
+      if (tokenData.access_token) {
+        const expiresAt = Date.now() + tokenData.expires_in * 1000;
+        //console.log()
+
+        store.set('access_token', tokenData.access_token);
+        store.set('refresh_token', tokenData.refresh_token);
+        store.set('expires_at', expiresAt);
+
+        console.log('Tokens saved to store');
+        startTokenRefresh();
+        res.send('Login successful. You can close this window.'+new Date(expiresAt));
+      } else {
+        console.error('Token error:', tokenData);
+        res.status(500).send('Failed to get token');
+      }
+    } catch (err) {
+      console.error('Token request failed:', err);
+      res.status(500).send('Token exchange failed');
+    }
+  });
+
+function startTokenRefresh() {
+  if (refreshInterval) clearInterval(refreshInterval);
+
+  const expiresAt = store.get('expires_at');
+  const refresh_token = store.get('refresh_token');
+
+  if (!expiresAt || !refresh_token) return;
+
+  const timeUntilRefresh = expiresAt - Date.now() - 60_000; // 1 minute before expiry
+
+  refreshInterval = setTimeout(async () => {
+    console.log('Attempting to refresh token...');
+    try {
+      const tokenRes = await fetch(TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: CLIENT_ID,
+          refresh_token: refresh_token
+        })
+      });
+
+      const tokenData = await tokenRes.json();
+
+      if (tokenData.access_token) {
+        console.log('Token refreshed!'+new Date(Date.now() + tokenData.expires_in * 1000));
+        store.set('access_token', tokenData.access_token);
+        store.set('refresh_token', tokenData.refresh_token || refresh_token);
+        store.set('expires_at', Date.now() + tokenData.expires_in * 1000);
+        startTokenRefresh(); // Set up next refresh
+      } else {
+        console.error('Failed to refresh token:', tokenData);
+      }
+    } catch (err) {
+      console.error('Refresh token error:', err);
+    }
+  }, Math.max(1000, timeUntilRefresh));
+}
+
 
 function createWindow() {
   let pathom = ""
