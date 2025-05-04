@@ -28,6 +28,21 @@ expressApp.use(cors());
 let win;
 const distPath = `dist/angular-electron`;
 
+const gotTheLock = app.requestSingleInstanceLock()
+    
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // Someone tried to run a second instance, we should focus our window.
+    if (win) {
+      if (win.isMinimized()) win.restore()
+        win.focus()
+    }
+  })
+}
+
+
 expressApp.get("/test", (req, res) => {
   console.log("Hit");
   res.send({ response: "Here is a response" });
@@ -51,7 +66,7 @@ expressApp.get("/test", (req, res) => {
   expressApp.get('/auth/callback', async (req, res) => {
     const authCode = req.query.code;
     if (!authCode || !code_verifier) {
-      return res.status(400).send('Missing authorization code or verifier');
+      return res.status(400).sendFile(__dirname + "/src/views/error.html")//.send('Missing authorization code or verifier');
     }
 
     try {
@@ -79,14 +94,17 @@ expressApp.get("/test", (req, res) => {
 
         console.log('Tokens saved to store');
         startTokenRefresh();
-        res.send('Login successful. You can close this window.'+new Date(expiresAt));
+        res.sendFile(__dirname + "/src/views/successful.html")
+        //res.send('Login successful. You can close this window.'+new Date(expiresAt));
       } else {
         console.error('Token error:', tokenData);
-        res.status(500).send('Failed to get token');
+        res.status(500)//.send('Failed to get token');
+        res.sendFile(__dirname + "/src/views/error.html")
       }
     } catch (err) {
       console.error('Token request failed:', err);
-      res.status(500).send('Token exchange failed');
+      res.status(500)//.send('Token exchange failed');
+      res.sendFile(__dirname + "/src/views/error.html")
     }
   });
 
@@ -166,3 +184,12 @@ app.on("window-all-closed", function () {
     app.quit();
   }
 });
+
+
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('openmod', process.execPath, [path.resolve(process.argv[1])])
+  }
+} else {
+  app.setAsDefaultProtocolClient('openmod')
+}
