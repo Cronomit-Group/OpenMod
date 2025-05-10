@@ -10,7 +10,7 @@
     "test": "ng test",
     "electron": "electron .",
     "electron-build": "ng build --configuration production && electron .",
-    "dev": "concurrently \"ng serve\" \"electron .\"",
+    "dev": "concurrently \"ng serve\" \"wait-on http://localhost:4200 && electron .\"",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
