@@ -1,6 +1,7 @@
 import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { SpinnerComponent } from './theme/shared/components/spinner/spinner.component';
+import {provideHttpClient} from "@angular/common/http";
 
 @Component({
   selector: 'app-root',
@@ -9,5 +10,5 @@ import { SpinnerComponent } from './theme/shared/components/spinner/spinner.comp
   imports: [RouterOutlet, SpinnerComponent]
 })
 export class AppComponent {
-  title = 'Berry Angular Free Version';
+  title = 'Cronomit OpenMod';
 }
